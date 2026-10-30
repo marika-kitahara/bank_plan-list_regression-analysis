@@ -5,13 +5,10 @@ import streamlit as st
 import pandas as pd
 from openpyxl.styles import Border, Side, Font
 
-st.set_page_config(page_title="転記用生成ツール", layout="wide")
+st.set_page_config(page_title="転記用生成・回帰分析", layout="wide")
 
 FMT_PATH = "転記用FMT.xlsx"
 
-# ==============================
-# 罫線
-# ==============================
 thin = Border(
     left=Side(style="thin"),
     right=Side(style="thin"),
@@ -19,9 +16,6 @@ thin = Border(
     bottom=Side(style="thin")
 )
 
-# ==============================
-# 日付変換
-# ==============================
 def to_date(val):
     if isinstance(val, datetime):
         return val.date()
@@ -32,10 +26,6 @@ def to_date(val):
     except:
         return None
 
-
-# ==============================
-# 転記ツール（完全そのまま）
-# ==============================
 def parse_input(ws):
     media_blocks = {}
     current_media = None
@@ -63,7 +53,6 @@ def parse_input(ws):
 
     return media_blocks
 
-
 def safe_sheet_title(title, used_titles):
     """Excelのシート名制限に合わせて、重複しないシート名を作る。"""
     invalid_chars = ['\\', '/', '*', '[', ']', ':', '?']
@@ -83,7 +72,6 @@ def safe_sheet_title(title, used_titles):
     used_titles.add(safe_title)
     return safe_title
 
-
 def merge_media_blocks(base_blocks, add_blocks):
     """複数の元データシートから取得した媒体ブロックを、媒体名ごとに合算する。"""
     for media, records in add_blocks.items():
@@ -91,7 +79,6 @@ def merge_media_blocks(base_blocks, add_blocks):
             base_blocks[media] = []
         base_blocks[media].extend(records)
     return base_blocks
-
 
 def build_workbook(input_bytes, fmt_bytes, selected_sheets):
     """
@@ -172,10 +159,6 @@ def build_workbook(input_bytes, fmt_bytes, selected_sheets):
 
     return output.getvalue(), sheet_count, total_days
 
-
-# ==============================
-# リッジ回帰による施策評価
-# ==============================
 import numpy as np
 from sklearn.linear_model import RidgeCV
 from sklearn.preprocessing import StandardScaler
@@ -188,7 +171,6 @@ DEFAULT_TARGET_COL_NAME = "cv"          # 目的変数。通常はCV
 DEFAULT_FEATURE_START_COL_IDX = 6       # G列以降を施策フラグとして扱う（0始まりなので6）
 RIDGE_ALPHAS = np.logspace(-3, 3, 30)
 
-
 def safe_float(v):
     try:
         if pd.isna(v):
@@ -196,7 +178,6 @@ def safe_float(v):
         return float(v)
     except Exception:
         return None
-
 
 def make_unique_sheet_name(wb, base_name):
     """Excelの31文字制限と重複回避。"""
@@ -212,7 +193,6 @@ def make_unique_sheet_name(wb, base_name):
 
     return base[:28] + "_xx"
 
-
 def auto_fit_columns(ws, max_width=60):
     for col in ws.columns:
         max_len = 0
@@ -222,9 +202,6 @@ def auto_fit_columns(ws, max_width=60):
                 continue
             max_len = max(max_len, len(str(cell.value)))
         ws.column_dimensions[col_letter].width = min(max_len + 2, max_width)
-
-
-
 
 def column_label(idx):
     """0始まりの列番号を、Excel風の列名付きラベルにする。"""
@@ -240,7 +217,6 @@ def get_default_target_col(columns):
     if len(cols) >= 4:
         return cols[3]
     return cols[0] if cols else None
-
 
 def make_regression_precheck(input_bytes, selected_sheets, target_col_name, feature_start_col_idx):
     """実行前に、シートごとの解析可否をざっくり確認してStreamlitに表示するための表を作る。"""
@@ -360,7 +336,6 @@ def star_rating(score, max_score):
         return "★★☆☆☆"
     return "★☆☆☆☆"
 
-
 def make_action_comment(row):
     """営業向けの短い診断コメント。"""
     if row["推定CV差分_0to1"] <= 0:
@@ -371,13 +346,11 @@ def make_action_comment(row):
         return "プラス推定ですが、同時実施やON日数の偏りがあるため解釈注意です。"
     return "プラス推定かつ比較的評価しやすい施策です。継続/優先候補です。"
 
-
 def prepare_ridge_data(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature_start_col_idx=DEFAULT_FEATURE_START_COL_IDX):
     """1シート分のデータから、CVと施策フラグを取り出して学習用データを作る。"""
     if df.shape[1] <= feature_start_col_idx:
         return None, "G列以降の施策列がありません"
 
-    # 目的変数は cv 列優先。なければ従来どおりD列。
     if target_col_name in df.columns:
         y_raw = df[target_col_name]
         target_name = str(target_col_name)
@@ -387,12 +360,8 @@ def prepare_ridge_data(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature_star
 
     X_raw = df.iloc[:, feature_start_col_idx:].copy()
     X_raw.columns = [str(c) for c in X_raw.columns]
-
-    # 数値化。'-' や空欄は NaN 扱い。
     y = pd.to_numeric(y_raw, errors="coerce")
     X = X_raw.apply(pd.to_numeric, errors="coerce")
-
-    # 施策列は空欄を0扱いに寄せる。ただし目的変数が欠損の行は学習から除外。
     X = X.fillna(0)
     data = pd.concat([y.rename(target_name), X], axis=1).dropna(subset=[target_name])
 
@@ -402,7 +371,6 @@ def prepare_ridge_data(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature_star
     y_clean = data[target_name]
     X_clean = data.drop(columns=[target_name])
 
-    # 完全に変化がない列は、係数評価の対象外にする。
     variable_cols = [c for c in X_clean.columns if X_clean[c].nunique(dropna=False) > 1]
     removed_cols = [c for c in X_clean.columns if c not in variable_cols]
 
@@ -420,7 +388,6 @@ def prepare_ridge_data(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature_star
         "n_total": len(data),
     }, None
 
-
 def calc_max_corr(X):
     """各施策について、他施策との最大相関を返す。"""
     if X.shape[1] <= 1:
@@ -432,7 +399,6 @@ def calc_max_corr(X):
         others = corr.loc[col].drop(index=col, errors="ignore")
         result[col] = float(others.max()) if len(others) else 0
     return result
-
 
 def calc_correlation_pairs(X, threshold=0.70):
     """
@@ -502,13 +468,11 @@ def calc_correlation_pairs(X, threshold=0.70):
         .reset_index(drop=True)
     )
 
-
 def calc_correlation_matrix(X):
     """施策同士の相関行列。Excel出力用。"""
     if X.shape[1] <= 1:
         return pd.DataFrame()
     return X.corr().fillna(0)
-
 
 def ridge_analyze_one_sheet(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature_start_col_idx=DEFAULT_FEATURE_START_COL_IDX, corr_threshold=0.70):
     prepared, error = prepare_ridge_data(df, target_col_name, feature_start_col_idx)
@@ -539,8 +503,6 @@ def ridge_analyze_one_sheet(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature
     ridge = model.named_steps["ridgecv"]
 
     std_coef = pd.Series(ridge.coef_, index=X.columns)
-    # StandardScalerを使っているので、元スケールの係数に戻す。
-    # 施策フラグが0/1なら「0→1になったときの推定CV差分」に近い見方ができる。
     raw_coef = pd.Series(ridge.coef_ / scaler.scale_, index=X.columns)
 
     on_days = X.sum(axis=0)
@@ -581,19 +543,14 @@ def ridge_analyze_one_sheet(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature
 
     ranking = pd.DataFrame(rows)
 
-    # 寄与度：係数の絶対値を全施策合計で割った比較用スコア。
-    # 「何%貢献した」と断定するものではなく、モデル上の相対的な重要度として使う。
     total_abs = ranking["影響度_abs"].sum() if len(ranking) else 0
     if total_abs > 0:
         ranking["寄与度_%"] = ranking["影響度_abs"] / total_abs
     else:
         ranking["寄与度_%"] = 0
 
-    # 平均寄与CV：推定CV差分 × ON率。
-    # 施策が実際にONだった頻度込みで、期間平均にどの程度乗っていそうかの目安。
     ranking["平均寄与CV"] = ranking["推定CV差分_0to1"] * ranking["ON率"]
 
-    # おすすめスコア：プラス方向の推定効果 × 信頼度。営業向けの優先順位作成用。
     ranking["信頼係数"] = ranking["信頼度"].apply(confidence_score)
     ranking["おすすめスコア"] = ranking["推定CV差分_0to1"].clip(lower=0) * ranking["信頼係数"]
     max_reco_score = ranking["おすすめスコア"].max() if len(ranking) else 0
@@ -626,7 +583,6 @@ def ridge_analyze_one_sheet(df, target_col_name=DEFAULT_TARGET_COL_NAME, feature
         "y_actual": y,
         "y_pred": y_pred,
     }, None
-
 
 def write_ridge_result(ws, sheet_name, result):
     metrics = result["metrics"]
@@ -681,7 +637,6 @@ def write_ridge_result(ws, sheet_name, result):
             cell.value = v
             cell.border = thin
 
-    # 表示形式
     for r in range(start_row + 2, start_row + 2 + len(ranking)):
         ws.cell(r, 3).number_format = "0.000"      # 標準化影響度
         ws.cell(r, 4).number_format = "0.000"      # 影響度_abs
@@ -692,7 +647,6 @@ def write_ridge_result(ws, sheet_name, result):
         ws.cell(r, 11).number_format = "0.000"     # 最大相関
         ws.cell(r, 14).number_format = "0.000"     # おすすめスコア
 
-    # 棒グラフ：上位10件
     if len(ranking) > 0:
         chart = BarChart()
         chart.type = "bar"
@@ -708,7 +662,6 @@ def write_ridge_result(ws, sheet_name, result):
         chart.width = 18
         ws.add_chart(chart, "M14")
 
-    # 変化なしで除外した施策
     removed_cols = result.get("removed_cols", [])
     if removed_cols:
         removed_start = start_row + 4 + len(ranking)
@@ -718,7 +671,6 @@ def write_ridge_result(ws, sheet_name, result):
             ws.cell(i, 1).value = col_name
 
     auto_fit_columns(ws)
-
 
 def write_prediction_sheet(ws, sheet_name, result):
     ws["A1"] = f"実績CVと予測CV：{sheet_name}"
@@ -742,7 +694,6 @@ def write_prediction_sheet(ws, sheet_name, result):
             ws.cell(i, c).border = thin
 
     auto_fit_columns(ws)
-
 
 def write_correlation_sheet(ws, sheet_name, result):
     """施策同士の相関が高い組み合わせを出力する。"""
@@ -791,7 +742,6 @@ def write_correlation_sheet(ws, sheet_name, result):
             ws.cell(r, 7).number_format = "0.0%"
             ws.cell(r, 8).number_format = "0.0%"
 
-    # 相関行列も下部に出力。施策数が多すぎる場合も、Excelの横幅に注意しつつ全部出す。
     matrix = result.get("correlation_matrix", pd.DataFrame())
     matrix_start = start_row + 5 + max(len(pairs), 1)
     ws.cell(matrix_start, 1).value = "相関行列"
@@ -800,14 +750,12 @@ def write_correlation_sheet(ws, sheet_name, result):
     if matrix.empty:
         ws.cell(matrix_start + 1, 1).value = "相関行列を作成できませんでした"
     else:
-        # ヘッダー
         for c_idx, col_name in enumerate(matrix.columns, 2):
             cell = ws.cell(matrix_start + 1, c_idx)
             cell.value = col_name
             cell.font = Font(bold=True)
             cell.border = thin
 
-        # 行名 + 値
         for r_idx, row_name in enumerate(matrix.index, matrix_start + 2):
             ws.cell(r_idx, 1).value = row_name
             ws.cell(r_idx, 1).font = Font(bold=True)
@@ -819,7 +767,6 @@ def write_correlation_sheet(ws, sheet_name, result):
                 cell.border = thin
 
     auto_fit_columns(ws, max_width=40)
-
 
 def write_diagnosis_report(ws, sheet_name, result):
     """営業・マネージャー向けの診断レポートを作る。"""
@@ -850,7 +797,6 @@ def write_diagnosis_report(ws, sheet_name, result):
         ws.cell(i, 1).border = thin
         ws.cell(i, 2).border = thin
 
-    # 推奨候補：プラス推定かつおすすめスコア順
     reco = ranking[ranking["推定CV差分_0to1"] > 0].sort_values("おすすめスコア", ascending=False).head(10)
     start = 15
     ws.cell(start, 1).value = "優先候補ランキング"
@@ -875,7 +821,6 @@ def write_diagnosis_report(ws, sheet_name, result):
             ws.cell(r_idx, 5).number_format = "0.0%"
             ws.cell(r_idx, 8).number_format = "0.000"
 
-    # 注意施策：係数は大きいが信頼度が低い/中のもの
     caution = ranking[
         (ranking["影響度_abs"] > 0) &
         (~ranking["信頼度"].astype(str).str.startswith("🟢"))
@@ -904,7 +849,6 @@ def write_diagnosis_report(ws, sheet_name, result):
             ws.cell(r_idx, 6).number_format = "0.0%"
             ws.cell(r_idx, 7).number_format = "0.000"
 
-    # 相関注意サマリー
     corr_start = caution_start + 5 + max(len(caution), 1)
     ws.cell(corr_start, 1).value = "同時実施の注意"
     ws.cell(corr_start, 1).font = Font(bold=True)
@@ -916,7 +860,6 @@ def write_diagnosis_report(ws, sheet_name, result):
         ws.cell(corr_start + 1, 1).value = f"相関0.90以上：{len(high)}ペア / 相関0.70以上0.90未満：{len(mid)}ペア"
         ws.cell(corr_start + 2, 1).value = "相関が高い施策は、ランキング上位でも単独効果としては断定しないでください。"
 
-    # 棒グラフ：おすすめスコア上位
     if not reco.empty:
         chart = BarChart()
         chart.type = "bar"
@@ -924,7 +867,6 @@ def write_diagnosis_report(ws, sheet_name, result):
         chart.y_axis.title = "施策"
         chart.x_axis.title = "推定CV差分×信頼度"
         max_items = min(10, len(reco))
-        # 診断レポート上におすすめスコア作業列を置く
         work_col = 11
         ws.cell(start + 1, work_col).value = "おすすめスコア"
         for idx, (_, r) in enumerate(reco.head(max_items).iterrows(), start + 2):
@@ -938,7 +880,6 @@ def write_diagnosis_report(ws, sheet_name, result):
         ws.add_chart(chart, "K15")
 
     auto_fit_columns(ws, max_width=60)
-
 
 def run_regression_all_sheets(input_bytes, selected_sheets=None, target_col_name=DEFAULT_TARGET_COL_NAME, feature_start_col_idx=DEFAULT_FEATURE_START_COL_IDX, corr_threshold=0.70):
     xls = pd.ExcelFile(io.BytesIO(input_bytes))
@@ -1008,7 +949,6 @@ def run_regression_all_sheets(input_bytes, selected_sheets=None, target_col_name
         })
         created += 1
 
-    # 全体サマリー
     summary_ws = wb.create_sheet("全体サマリー", 0)
     summary_ws["A1"] = "リッジ回帰 施策評価サマリー"
     summary_ws["A1"].font = Font(bold=True, size=14)
@@ -1035,11 +975,7 @@ def run_regression_all_sheets(input_bytes, selected_sheets=None, target_col_name
 
     return output.getvalue()
 
-# ==============================
-# UI
-# ==============================
 tab1, tab2 = st.tabs(["転記用生成", "回帰分析"])
-
 
 with tab1:
     st.title("転記用エクセル生成ツール")
@@ -1082,7 +1018,6 @@ with tab1:
                     file_name=f"転記用_{today_str}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
 
 with tab2:
     st.title("回帰分析ツール")
